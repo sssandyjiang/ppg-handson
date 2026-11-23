@@ -124,7 +124,7 @@
   </details>
   <details>
     <summary>Backup and restore</summary>
-    <p class="note"><b>Backup:</b> every recording on this device in one CSV file (one row per camera frame).</p>
+    <p class="note"><b>Backup:</b> every recording on this device in one CSV file (one row per camera frame). On a phone, choose <b>Save to Files</b> (or AirDrop / mail it to yourself) and remember the folder.</p>
     <div class="row"><button id="allBtn">Download all my recordings (CSV)</button></div>
     <p class="note"><b>Restore:</b> load a CSV downloaded above — on this or another device. Recordings already in your list are skipped. Sending them again is safe: the class sheet stores each recording once.</p>
     <div class="row"><input id="importFile" type="file" accept=".csv,text/csv" class="hidden">
@@ -418,14 +418,25 @@ $('sampleBtn').onclick = async () => {
   setStatus('Showing a sample Rest recording from the lecturer (not saved to your list).');
 };
 function download(name, text) {
+  // On phones, open the share sheet so students pick where the file goes ("Save to Files", AirDrop, mail);
+  // a plain download on iPhone lands in a Downloads folder that is hard to find and opens in Excel.
+  const file = new File([text], name, { type: 'text/csv' });
+  if (guessDevice() !== 'Laptop' && navigator.canShare?.({ files: [file] })) {
+    navigator.share({ files: [file] }).catch(() => {});
+    return 'Choose "Save to Files" and pick a folder you will remember.';
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
   a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 const CSV_COLS = 'recording_id,pair,device,condition,recorded_at,camera_bpm,manual_count_30s,quality,finger_share,use,sent,t_s,red';
-$('allBtn').onclick = () => download(`ppg_pair${state.pair || 'x'}_all.csv`, CSV_COLS + '\n' +
-  state.recs.flatMap(r => r.t.map((s, i) => [r.id, state.pair, state.phone, COND_LABEL[r.cond], r.at, r.bpm ?? '', r.count ?? '',
-    r.quality, r.fingerShare ?? '', r.use ? 1 : 0, r.sent ? 1 : 0, s, r.red[i]].join(','))).join('\n') + '\n');
+$('allBtn').onclick = () => {
+  const name = `ppg_pair${state.pair || 'x'}_all.csv`;
+  const msg = download(name, CSV_COLS + '\n' +
+    state.recs.flatMap(r => r.t.map((s, i) => [r.id, state.pair, state.phone, COND_LABEL[r.cond], r.at, r.bpm ?? '', r.count ?? '',
+      r.quality, r.fingerShare ?? '', r.use ? 1 : 0, r.sent ? 1 : 0, s, r.red[i]].join(','))).join('\n') + '\n');
+  $('importStatus').textContent = msg || `Saved to Downloads as ${name}.`;
+};
 
 // Restore: one CSV row per camera frame, grouped back into recordings. Also reads the shorter
 // file written by the previous version of this page (no recorded_at / finger_share / use / sent).
