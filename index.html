@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone Camera Pulse</title>
+<style>
+  :root { --red: #c8303c; --ink: #1f2937; --grey: #6b7280; --line: #e5e7eb; --bg: #ffffff; --soft: #f3f4f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, "Hiragino Sans", sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 4px 0 2px; }
+  h2 { font-size: 1.05rem; margin: 22px 0 6px; }
+  .sub { color: var(--grey); margin: 0 0 12px; font-size: .95rem; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+  button, select, input { font: inherit; font-size: 1rem; }
+  button { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--soft); color: var(--ink); flex: 1 1 auto; }
+  button.primary { background: var(--red); color: #fff; border-color: var(--red); }
+  button:disabled { opacity: .45; }
+  button.small { flex: none; padding: 6px 10px; font-size: .9rem; }
+  select, input[type=number] { padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { flex: none; padding: 8px 12px; border-radius: 999px; font-size: .95rem; }
+  .chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .status { display: flex; align-items: center; gap: 8px; font-size: .95rem; min-height: 1.5em; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--line); flex: none; }
+  .dot.ok { background: #16a34a; } .dot.bad { background: var(--red); }
+  canvas#plot { width: 100%; height: 150px; background: var(--soft); border-radius: 10px; display: block; margin-top: 8px; }
+  .big { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 2px; }
+  .big .num { font-size: 2.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .big .unit { color: var(--grey); }
+  .note { color: var(--grey); font-size: .85rem; }
+  .card { border-left: 4px solid var(--red); background: #fdf2f3; padding: 10px 12px; border-radius: 6px; margin: 12px 0; }
+  .rule { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
+  .rule label { display: block; margin-top: 8px; font-size: .95rem; }
+  .rule input[type=range] { width: 100%; }
+  table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--grey); font-weight: 600; font-size: .85rem; }
+  tr.viewing td { background: #fdf2f3; }
+  tr.excluded td:not(.keep) { color: #b0b4ba; text-decoration: line-through; }
+  td.cond { color: var(--red); text-decoration: underline; cursor: pointer; }
+  .sent { color: #16a34a; font-size: .8rem; }
+  details { margin-top: 14px; font-size: .95rem; }
+  ol { padding-left: 1.2em; margin: 6px 0; } li { margin: 4px 0; }
+  video { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; } /* kept 'visible' so browsers keep decoding frames */
+  .hidden { display: none !important; }
+  a { color: var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Measure your pulse with your phone camera</h1>
+  <p class="sub">Two Eyes on the Body · Lecture 1 hands-on</p>
+
+  <div class="row">
+    <label>Pair <select id="pair"></select></label>
+    <label>Device <select id="phone"><option>iPhone</option><option>Android</option><option>Laptop</option></select></label>
+  </div>
+
+  <div class="chips" id="conds"></div>
+
+  <div class="row">
+    <button id="startBtn" class="primary">Start camera</button>
+    <button id="recBtn" class="primary" disabled>Record 30 s</button>
+  </div>
+
+  <div class="status"><span id="fingerDot" class="dot"></span><span id="statusText">Choose your pair, then press "Start camera".</span></div>
+  <canvas id="plot"></canvas>
+  <div class="big"><span class="num" id="bpm">--</span><span class="unit" id="bpmUnit">bpm</span></div>
+
+  <div id="saveCard" class="card hidden">
+    <div id="saveText"></div>
+    <div class="row">
+      <label>Beats you counted in 30 s: <input id="countIn" type="number" inputmode="numeric" min="0" max="150" style="width:5.5em"></label>
+    </div>
+    <div class="row">
+      <button id="saveBtn" class="primary">Save to my list</button>
+      <button id="discardBtn">Discard</button>
+    </div>
+  </div>
+
+  <div class="rule">
+    <b>Change the peak-counting rule</b> <span class="note">(for the recording shown above)</span>
+    <label>Threshold: <span id="thVal"></span> of the highest peak nearby
+      <input id="thSlider" type="range" min="0.1" max="0.9" step="0.05"></label>
+    <label>Minimum gap between beats: <span id="gapVal"></span> s
+      <input id="gapSlider" type="range" min="0.15" max="0.8" step="0.05"></label>
+    <p class="note" id="ruleOut">Record or open a recording, then move a slider. <button id="resetBtn" class="small">Reset</button></p>
+  </div>
+
+  <h2>My recordings</h2>
+  <p class="note" id="emptyNote">No recordings yet. Each 30 s recording you save appears here.</p>
+  <table id="list" class="hidden">
+    <thead><tr><th>Condition</th><th>Camera</th><th>You (×2)</th><th>Use</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="note">Tap a condition to look at that recording again. Untick "Use" only if <b>you</b> got something wrong (e.g. forgot to count). Keep "no pulse" rows — they are results too.</p>
+  <div class="row">
+    <button id="sendBtn" class="primary" disabled>Send to class</button>
+  </div>
+  <p class="note" id="sendStatus"></p>
+
+  <p class="note">Recordings stay on this device. "Send to class" shares your pair number, device type, the condition, the heart rates and the brightness wave of each recording — no names, no video, no photos.</p>
+
+  <div class="row">
+    <button id="sampleBtn">Camera not working? Look at a sample recording</button>
+  </div>
+
+  <details>
+    <summary>How to measure</summary>
+    <ol>
+      <li>Choose your pair number and the condition (start with <b>Rest</b>).</li>
+      <li>Hold the phone and cover the <b>whole</b> rear lens with the pad of your fingertip. Press gently.</li>
+      <li>Your partner shines their phone's flashlight on your <b>fingernail</b>.</li>
+      <li>When the dot turns green, your partner presses "Record 30 s". Hold still, and count your own pulse (neck or wrist) during the same 30 s.</li>
+      <li>Type your count, press "Save to my list", and start the next condition.</li>
+      <li>No phone? Open this page on a laptop and cover the webcam the same way.</li>
+    </ol>
+  </details>
+  <details>
+    <summary>How it works</summary>
+    <p>Each frame, the page averages the red brightness of the image. More blood in your fingertip absorbs more light, so the image gets slightly darker with every beat. The page removes slow drift, finds the peaks, and turns the gaps between peaks into beats per minute. A beat is counted when the wave reaches the <b>threshold</b> and comes at least the <b>minimum gap</b> after the previous beat — the two sliders. If your finger left the lens or the beats came at a very uneven pace, the page says <b>no pulse</b> instead of guessing. Full code: view this page's source — the first script is the whole processing chain.</p>
+  </details>
+  <details>
+    <summary>Backup and restore</summary>
+    <p class="note"><b>Backup:</b> every recording on this device in one CSV file (one row per camera frame).</p>
+    <div class="row"><button id="allBtn">Download all my recordings (CSV)</button></div>
+    <p class="note"><b>Restore:</b> load a CSV downloaded above — on this or another device. Recordings already in your list are skipped. Sending them again is safe: the class sheet stores each recording once.</p>
+    <div class="row"><input id="importFile" type="file" accept=".csv,text/csv" class="hidden">
+    <button id="importBtn">Import recordings (CSV)</button></div>
+    <p class="note" id="importStatus"></p>
+    <div class="row"><button id="clearBtn">Clear my list</button></div>
+  </details>
+  <video id="video" playsinline muted></video>
+</main>
+
+<script src="ppg.js"></script>
+<script>
+
+// Apps Script web-app URL of the class sheet (set by the instructor; empty = sending disabled).
+const SUBMIT_URL = 'https://script.google.com/macros/s/AKfycbwLE0ot7qo80z8mzwgOkYGxcaznw6tS4yXLxHztQa9Ds4UVZrpyc3f2O0HueZ6M_K0/exec';
+const PAIRS = 15, RECORD_SECONDS = 30, VIEW_SECONDS = 8, LIVE_SECONDS = 10, KEEP_SECONDS = 12;
+const CONDITIONS = [['rest', 'Rest'], ['squats', 'After squats'], ['press', 'Press hard'], ['move', 'Move'], ['warm', 'Warm hands']];
+const COND_LABEL = Object.fromEntries(CONDITIONS);
+const STORE = 'ppg-handson-L1';
+
+const $ = id => document.getElementById(id);
+const video = $('video'), plot = $('plot');
+const grab = document.createElement('canvas');
+grab.width = 40; grab.height = 30;
+const gctx = grab.getContext('2d', { willReadFrequently: true });
+
+let stream = null;
+let t = [], red = [];          // rolling buffer for the live view
+let rec = null;                // recording in progress
+let pending = null;            // finished recording waiting to be saved
+let shown = null;              // recording currently on screen { t, red, id? }
+let threshold = THRESHOLD, minGap = MIN_GAP;
+
+// ---- saved state (stays on this device) ----
+const uid = () => crypto.randomUUID ? crypto.randomUUID()
+  : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);   // older iOS has no randomUUID
+const guessDevice = () => /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android' : 'Laptop';
+const state = Object.assign({ device: uid(), pair: '', phone: guessDevice(), cond: 'rest', recs: [] },
+  JSON.parse(localStorage.getItem(STORE) || '{}'));
+const persist = () => {
+  try { localStorage.setItem(STORE, JSON.stringify(state)); }
+  catch { setStatus('This phone\'s storage is full — send your recordings, then delete old ones.', false); }
+};
+
+// Everything we report about one 30 s recording, always with the default rule.
+function summarise(rec, fingerShare = rec.fingerShare ?? 1) {
+  const res = analyse(rec.red, rec.t);
+  const quality = checkQuality(res.hr, fingerShare);
+  const ibis = res.hr ? res.hr.ibis : [];
+  return {
+    bpm: quality ? null : Math.round(res.hr.bpm), beats: res.hr ? res.hr.beats : 0, quality: quality || 'ok',
+    ibis: ibis.map(g => Math.round(g * 1000)), rmssd: quality ? null : Math.round(rmssd(ibis)),
+    fps: Math.round(sampleRate(rec.t)), fingerShare,
+  };
+}
+for (const r of state.recs) if (!r.quality && !r.sent) Object.assign(r, summarise(r));   // recordings saved by older versions
+persist();
+
+$('pair').innerHTML = '<option value="">–</option>' + Array.from({ length: PAIRS }, (_, i) => `<option>${i + 1}</option>`).join('');
+$('pair').value = state.pair; $('phone').value = state.phone;
+$('pair').onchange = e => { state.pair = e.target.value; persist(); renderList(); };
+$('phone').onchange = e => { state.phone = e.target.value; persist(); };
+
+function renderConds() {
+  $('conds').innerHTML = '';
+  for (const [key, label] of CONDITIONS) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (state.cond === key ? ' on' : '');
+    b.textContent = label;
+    b.onclick = () => { state.cond = key; persist(); renderConds(); };
+    $('conds').append(b);
+  }
+}
+renderConds();
+
+function setStatus(text, ok) {
+  $('statusText').textContent = text;
+  $('fingerDot').className = 'dot' + (ok === true ? ' ok' : ok === false ? ' bad' : '');
+}
+
+// ---- camera ----
+async function start() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus('This browser cannot use the camera here (the page must be opened over https).', false); return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 30 } },
+    });
+  } catch (e) {
+    setStatus(`Camera not available (${e.name}). Allow camera access, or try another device.`, false); return;
+  }
+  video.srcObject = stream;
+  await video.play();
+  hideSaveCard(); shown = null; renderList();
+  $('startBtn').textContent = 'Stop camera'; $('recBtn').disabled = false;
+  t = []; red = [];
+  nextFrame();
+}
+
+function stop() {
+  stream?.getTracks().forEach(tr => tr.stop());
+  stream = null; rec = null;
+  $('startBtn').textContent = 'Start camera'; $('recBtn').disabled = true; $('recBtn').textContent = 'Record 30 s';
+}
+
+function nextFrame() {
+  if (!stream) return;
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+  else requestAnimationFrame(onFrame);
+}
+
+function onFrame() {
+  if (!stream) return;
+  gctx.drawImage(video, 0, 0, grab.width, grab.height);
+  const rgb = meanRGB(gctx.getImageData(0, 0, grab.width, grab.height).data);
+  const now = performance.now() / 1000;
+  t.push(now); red.push(rgb[0]);
+  while (now - t[0] > KEEP_SECONDS) { t.shift(); red.shift(); }
+
+  const finger = fingerOnLens(rgb);
+  if (rec) {
+    rec.t.push(now); rec.red.push(rgb[0]); rec.onLens += finger ? 1 : 0;
+    $('recBtn').textContent = `Recording… ${Math.ceil(RECORD_SECONDS - (now - rec.start))} s`;
+    if (now - rec.start >= RECORD_SECONDS) { finishRecording(); return; }
+  }
+  if (!rec) setStatus(finger ? 'Finger detected — ready to record.' : 'Cover the whole lens with your fingertip; light on your fingernail.', finger);
+  else setStatus('Recording — hold still and count your pulse.', finger);
+
+  const view = lastSeconds(VIEW_SECONDS);
+  if (view.t.length > 30) { const r = run(view.red, view.t); draw(r.y, view.t, r.peaks); }
+  const live = lastSeconds(LIVE_SECONDS);
+  const hr = finger && live.t.length > 60 ? run(live.red, live.t).hr : null;
+  $('bpm').textContent = hr && !checkQuality(hr, 1, 5) ? Math.round(hr.bpm) : '--';
+  $('bpmUnit').textContent = 'bpm (live)';
+  nextFrame();
+}
+
+function lastSeconds(s) {
+  const end = t[t.length - 1];
+  let i = t.length - 1;
+  while (i > 0 && end - t[i - 1] <= s) i--;
+  return { t: t.slice(i), red: red.slice(i) };
+}
+
+const run = (r, tt) => analyse(r, tt, threshold, minGap);
+
+// ---- recording → save card → list ----
+function startRecording() {
+  hideSaveCard();
+  rec = { start: performance.now() / 1000, t: [], red: [], onLens: 0 };
+  $('recBtn').disabled = true;
+}
+
+function finishRecording() {
+  const t0 = rec.t[0];
+  const data = { t: rec.t.map(v => +(v - t0).toFixed(3)), red: rec.red.map(v => +v.toFixed(2)) };
+  const fingerShare = +(rec.onLens / rec.t.length).toFixed(2);
+  stop();
+  pending = { ...data, cond: state.cond, ...summarise(data, fingerShare) };
+  show(data);
+  $('saveText').innerHTML = pending.bpm
+    ? `<b>${COND_LABEL[pending.cond]}: ${pending.bpm} bpm</b> from the camera`
+    : `<b>${COND_LABEL[pending.cond]}: no pulse</b> (${pending.quality}).<br>Save it anyway — "no pulse" is a result too. Or discard and try again.`;
+  $('countIn').value = '';
+  $('saveCard').classList.remove('hidden');
+  $('countIn').focus();
+  setStatus('Type the beats you counted, then save.');
+}
+
+function hideSaveCard() { $('saveCard').classList.add('hidden'); pending = null; }
+
+$('saveBtn').onclick = () => {
+  const n = $('countIn').value === '' ? null : Number($('countIn').value);
+  state.recs.push({ ...pending, id: uid(), at: new Date().toISOString(), count: n, use: true, sent: false });
+  persist(); hideSaveCard(); renderList();
+  setStatus('Saved. Choose the next condition and press "Start camera".');
+};
+$('discardBtn').onclick = () => { hideSaveCard(); setStatus('Discarded. Press "Start camera" to try again.'); };
+
+function renderList() {
+  const tb = $('list').querySelector('tbody');
+  tb.innerHTML = '';
+  state.recs.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    if (!r.use) tr.className = 'excluded';
+    if (shown && shown.id === r.id) tr.classList.add('viewing');
+    tr.innerHTML = `<td class="cond">${COND_LABEL[r.cond]}</td><td>${r.bpm ?? '<span class="note">no pulse</span>'}</td>` +
+      `<td>${r.count === null ? '–' : r.count * 2}</td>` +
+      `<td class="keep">${r.sent ? '<span class="sent">sent</span>' : `<input type="checkbox" ${r.use ? 'checked' : ''}>`}</td>` +
+      `<td class="keep">${r.sent ? '' : '<button class="small">✕</button>'}</td>`;
+    tr.querySelector('.cond').onclick = () => { stop(); hideSaveCard(); show(r); renderList(); setStatus(`Showing: ${COND_LABEL[r.cond]}.`); };
+    const box = tr.querySelector('input'); if (box) box.onchange = e => { r.use = e.target.checked; persist(); renderList(); };
+    const del = tr.querySelector('button'); if (del) del.onclick = () => { if (confirm('Delete this recording?')) { state.recs.splice(i, 1); persist(); renderList(); } };
+    tb.append(tr);
+  });
+  const any = state.recs.length > 0;
+  $('list').classList.toggle('hidden', !any); $('emptyNote').classList.toggle('hidden', any);
+  const toSend = state.recs.filter(r => r.use && !r.sent).length;
+  $('sendBtn').disabled = !SUBMIT_URL || !state.pair || toSend === 0;
+  $('sendBtn').textContent = toSend ? `Send ${toSend} recording${toSend > 1 ? 's' : ''} to class` : 'Send to class';
+  const hint = !SUBMIT_URL ? 'Sending is not set up yet.' : !state.pair ? 'Choose your pair number to send.' : '';
+  if (hint || ['Sending is not set up yet.', 'Choose your pair number to send.'].includes($('sendStatus').textContent))
+    $('sendStatus').textContent = hint;
+}
+
+// ---- show a recording + the peak-rule sliders ----
+function show(r) {
+  shown = r;
+  updateShown();
+}
+
+function updateShown() {
+  if (!shown) return;
+  const res = run(shown.red, shown.t);
+  const why = checkQuality(res.hr, shown.fingerShare ?? 1);
+  draw(res.y, shown.t, res.peaks);
+  $('bpm').textContent = why ? '--' : Math.round(res.hr.bpm);
+  $('bpmUnit').textContent = why ? `no pulse (${why})` : 'bpm (30 s recording)';
+  const changed = threshold !== THRESHOLD || minGap !== MIN_GAP;
+  const dots = res.hr ? `${res.hr.beats} dots` : 'hardly any dots';
+  $('ruleOut').firstChild.textContent = changed
+    ? `With your rule: ${why ? `no pulse (${why}), ${dots}` : `${Math.round(res.hr.bpm)} bpm, ${dots}`}. `
+    : 'Move a slider: the red dots and the bpm update instantly. ';
+}
+
+function syncSliders() {
+  $('thSlider').value = threshold; $('gapSlider').value = minGap;
+  $('thVal').textContent = Math.round(threshold * 100) + '%';
+  $('gapVal').textContent = minGap.toFixed(2);
+  updateShown();
+}
+$('thSlider').oninput = e => { threshold = Number(e.target.value); syncSliders(); };
+$('gapSlider').oninput = e => { minGap = Number(e.target.value); syncSliders(); };
+$('resetBtn').onclick = () => { threshold = THRESHOLD; minGap = MIN_GAP; syncSliders(); };
+
+function draw(y, tt, peaks) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = plot.clientWidth, h = plot.clientHeight;
+  plot.width = w * dpr; plot.height = h * dpr;
+  const c = plot.getContext('2d');
+  c.scale(dpr, dpr); c.clearRect(0, 0, w, h);
+  if (y.length < 2) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of y) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
+  const t0 = tt[0], span = tt[tt.length - 1] - t0 || 1;
+  const X = s => ((s - t0) / span) * (w - 16) + 8;
+  const Y = v => h - 8 - ((v - lo) / (hi - lo)) * (h - 16);
+  c.strokeStyle = '#1f2937'; c.lineWidth = 1.5; c.beginPath();
+  y.forEach((v, i) => (i ? c.lineTo(X(tt[i]), Y(v)) : c.moveTo(X(tt[i]), Y(v))));
+  c.stroke();
+  c.fillStyle = '#c8303c';
+  for (const i of peaks) { c.beginPath(); c.arc(X(tt[i]), Y(y[i]), 3.5, 0, 2 * Math.PI); c.fill(); }
+}
+
+// ---- send to the class sheet ----
+$('sendBtn').onclick = async () => {
+  const rows = state.recs.filter(r => r.use && !r.sent);
+  const payload = {
+    device: state.device, pair: state.pair, phone: state.phone,
+    version: 2,
+    rows: rows.map(r => ({ id: r.id, at: r.at, cond: r.cond, camera_bpm: r.bpm, manual_count: r.count,
+      quality: r.quality, beats: r.beats, rmssd_ms: r.rmssd, finger_share: r.fingerShare, fps: r.fps,
+      ibis_ms: r.ibis, t: r.t, red: r.red })),
+  };
+  $('sendBtn').disabled = true; $('sendStatus').textContent = 'Sending…';
+  try {
+    const res = await fetch(SUBMIT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || 'rejected');
+    rows.forEach(r => { r.sent = true; });
+    persist();
+    $('sendStatus').textContent = `Sent ${rows.length} recording${rows.length > 1 ? 's' : ''}. Thank you!`;
+  } catch (e) {
+    $('sendStatus').textContent = `Could not send (${e.message}). Check the connection and try again.`;
+  }
+  renderList();
+};
+
+// ---- extras ----
+$('startBtn').onclick = () => (stream ? (stop(), setStatus('Camera stopped.')) : start());
+$('recBtn').onclick = startRecording;
+$('sampleBtn').onclick = async () => {
+  let text;
+  try { const r = await fetch('sample.csv'); if (!r.ok) throw r.status; text = await r.text(); } catch { return setStatus('Could not load the sample — check your connection.'); }
+  const rows = text.trim().split(/\r?\n/).slice(1).map(l => l.split(',').map(Number));
+  stop(); hideSaveCard();
+  show({ t: rows.map(x => x[0]), red: rows.map(x => x[1]) }); renderList();
+  setStatus('Showing a sample Rest recording from the lecturer (not saved to your list).');
+};
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const CSV_COLS = 'recording_id,pair,device,condition,recorded_at,camera_bpm,manual_count_30s,quality,finger_share,use,sent,t_s,red';
+$('allBtn').onclick = () => download(`ppg_pair${state.pair || 'x'}_all.csv`, CSV_COLS + '\n' +
+  state.recs.flatMap(r => r.t.map((s, i) => [r.id, state.pair, state.phone, COND_LABEL[r.cond], r.at, r.bpm ?? '', r.count ?? '',
+    r.quality, r.fingerShare ?? '', r.use ? 1 : 0, r.sent ? 1 : 0, s, r.red[i]].join(','))).join('\n') + '\n');
+
+// Restore: one CSV row per camera frame, grouped back into recordings. Also reads the shorter
+// file written by the previous version of this page (no recorded_at / finger_share / use / sent).
+function importCsv(text) {
+  const [head, ...lines] = text.trim().split(/\r?\n/);
+  const col = Object.fromEntries(head.split(',').map((h, i) => [h.trim(), i]));
+  if (!['recording_id', 'condition', 't_s', 'red'].every(h => h in col)) throw new Error('not a recordings file from this page');
+  const condKey = Object.fromEntries(CONDITIONS.map(([k, label]) => [label, k]));
+  const have = new Set(state.recs.map(r => r.id)), byId = new Map();
+  for (const line of lines) {
+    const v = line.split(','), id = v[col.recording_id];
+    if (!id || have.has(id) || !condKey[v[col.condition]]) continue;
+    if (!byId.has(id)) {
+      const get = h => (h in col ? v[col[h]] : '');
+      byId.set(id, { id, cond: condKey[v[col.condition]], at: get('recorded_at') || null, pair: get('pair'),
+        count: get('manual_count_30s') === '' ? null : Number(get('manual_count_30s')),
+        fingerShare: get('finger_share') === '' ? 1 : Number(get('finger_share')),
+        use: get('use') !== '0', sent: get('sent') === '1', t: [], red: [] });
+    }
+    byId.get(id).t.push(Number(v[col.t_s])); byId.get(id).red.push(Number(v[col.red]));
+  }
+  const recs = [...byId.values()].filter(r => r.t.length > 60);
+  for (const r of recs) {
+    if (!state.pair && r.pair) { state.pair = r.pair; $('pair').value = r.pair; }
+    delete r.pair;
+    state.recs.push({ ...r, ...summarise(r) });
+  }
+  persist(); renderList();
+  return recs.length;
+}
+$('importBtn').onclick = () => $('importFile').click();
+$('importFile').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { $('importStatus').textContent = `Imported ${importCsv(await f.text())} recording(s).`; }
+  catch (err) { $('importStatus').textContent = `Could not import (${err.message}).`; }
+  e.target.value = '';
+};
+$('clearBtn').onclick = () => { if (confirm('Delete all recordings on this device?')) { state.recs = []; persist(); shown = null; renderList(); } };
+
+syncSliders();
+renderList();
+</script>
+</body>
+</html>
