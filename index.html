@@ -415,7 +415,7 @@ $('sampleBtn').onclick = async () => {
   const rows = text.trim().split(/\r?\n/).slice(1).map(l => l.split(',').map(Number));
   stop(); hideSaveCard();
   show({ t: rows.map(x => x[0]), red: rows.map(x => x[1]) }); renderList();
-  setStatus('Showing a sample Rest recording from the lecturer (not saved to your list).');
+  setStatus('Showing a sample Rest recording (not saved to your list).');
 };
 function download(name, text) {
   // On phones, open the share sheet so students pick where the file goes ("Save to Files", AirDrop, mail);
