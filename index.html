@@ -41,6 +41,7 @@
   tr.excluded td:not(.keep) { color: #b0b4ba; text-decoration: line-through; }
   td.cond { color: var(--red); text-decoration: underline; cursor: pointer; }
   .sent { color: #16a34a; font-size: .8rem; }
+  .tag { color: var(--grey); font-size: .8rem; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
   details { margin-top: 14px; font-size: .95rem; }
   ol { padding-left: 1.2em; margin: 6px 0; } li { margin: 4px 0; }
   video { position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; } /* kept 'visible' so browsers keep decoding frames */
@@ -95,7 +96,7 @@
     <thead><tr><th>Condition</th><th>Camera</th><th>You (×2)</th><th>Use</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
-  <p class="note">Tap a condition to look at that recording again. Untick "Use" only if <b>you</b> got something wrong (e.g. forgot to count). Keep "no pulse" rows — they are results too.</p>
+  <p class="note">Tap a condition to look at that recording again. Untick "Use" only if <b>you</b> got something wrong (e.g. forgot to count). Keep "no pulse" rows — they are results too.<br>Rows marked <span class="tag">sample</span> are recordings from Lecture 1, one per condition — tap one to look at it and try the sliders. They are never sent.</p>
   <div class="row">
     <button id="sendBtn" class="primary" disabled>Send to class</button>
   </div>
@@ -322,8 +323,16 @@ function renderList() {
     const del = tr.querySelector('button'); if (del) del.onclick = () => { if (confirm('Delete this recording?')) { state.recs.splice(i, 1); persist(); renderList(); } };
     tb.append(tr);
   });
+  for (const sm of samples) {
+    const tr = document.createElement('tr');
+    if (shown && shown.id === sm.id) tr.className = 'viewing';
+    tr.innerHTML = `<td class="cond">${COND_LABEL[sm.cond]}</td><td>${sm.bpm ?? '<span class="note">no pulse</span>'}</td>` +
+      `<td>${sm.counted}</td><td class="keep" colspan="2"><span class="tag">sample</span></td>`;
+    tr.querySelector('.cond').onclick = () => showSample(sm);
+    tb.append(tr);
+  }
   const any = state.recs.length > 0;
-  $('list').classList.toggle('hidden', !any); $('emptyNote').classList.toggle('hidden', any);
+  $('list').classList.toggle('hidden', !any && !samples.length); $('emptyNote').classList.toggle('hidden', any);
   const toSend = state.recs.filter(r => r.use && !r.sent).length;
   $('sendBtn').disabled = !SUBMIT_URL || !state.pair || toSend === 0;
   $('sendBtn').textContent = toSend ? `Send ${toSend} recording${toSend > 1 ? 's' : ''} to class` : 'Send to class';
@@ -409,13 +418,30 @@ $('sendBtn').onclick = async () => {
 // ---- extras ----
 $('startBtn').onclick = () => (stream ? (stop(), setStatus('Camera stopped.')) : start());
 $('recBtn').onclick = startRecording;
+// Samples: one recording per condition from Lecture 1 (sample.csv: condition,counted_bpm,t_s,red).
+// They appear in the list marked "sample"; they are never saved, exported or sent.
+let samples = [];
+async function loadSamples() {
+  try {
+    const r = await fetch('sample.csv'); if (!r.ok) throw r.status;
+    const byCond = new Map();
+    for (const line of (await r.text()).trim().split(/\r?\n/).slice(1)) {
+      const [cond, counted, ts, v] = line.split(',');
+      if (!byCond.has(cond)) byCond.set(cond, { id: 'sample-' + cond, cond, counted: Number(counted), t: [], red: [] });
+      byCond.get(cond).t.push(Number(ts)); byCond.get(cond).red.push(Number(v));
+    }
+    samples = [...byCond.values()].filter(sm => COND_LABEL[sm.cond]).map(sm => ({ ...sm, ...summarise(sm, 1) }));
+  } catch { samples = []; }
+  renderList();
+}
+function showSample(sm) {
+  stop(); hideSaveCard(); show(sm); renderList();
+  setStatus(`Sample from Lecture 1: ${COND_LABEL[sm.cond]}. The student counted ${sm.counted} bpm. Not saved to your list.`);
+}
 $('sampleBtn').onclick = async () => {
-  let text;
-  try { const r = await fetch('sample.csv'); if (!r.ok) throw r.status; text = await r.text(); } catch { return setStatus('Could not load the sample — check your connection.'); }
-  const rows = text.trim().split(/\r?\n/).slice(1).map(l => l.split(',').map(Number));
-  stop(); hideSaveCard();
-  show({ t: rows.map(x => x[0]), red: rows.map(x => x[1]) }); renderList();
-  setStatus('Showing a sample Rest recording (not saved to your list).');
+  if (!samples.length) await loadSamples();
+  if (!samples.length) return setStatus('Could not load the samples — check your connection.');
+  showSample(samples.find(sm => sm.cond === 'rest') || samples[0]);
 };
 function download(name, text) {
   // On phones, open the share sheet so students pick where the file goes ("Save to Files", AirDrop, mail);
@@ -479,6 +505,7 @@ $('clearBtn').onclick = () => { if (confirm('Delete all recordings on this devic
 
 syncSliders();
 renderList();
+loadSamples();
 </script>
 </body>
 </html>
